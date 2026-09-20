@@ -1,0 +1,14 @@
+# build output
+/dist/
+/fmon
+/fmon.exe
+
+# test and tooling artifacts
+*.test
+*.out
+coverage.txt
+
+# editor / OS files
+.idea/
+.vscode/
+.DS_Store

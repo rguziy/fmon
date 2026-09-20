@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+        env:
+          CGO_ENABLED: "0"
+
+  build:
+    name: cross-compile
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build all targets
+        run: make all
+      - name: Verify the binaries are static and pure Go
+        run: |
+          file dist/bin/fmon_linux_amd64
+          go version -m dist/bin/fmon_linux_amd64 | grep -E 'CGO_ENABLED=0' 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS
+            dist/bin/
+
+  smoke-arm:
+    name: smoke test (${{ matrix.target }} under qemu)
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux_armv5
+            qemu: qemu-arm
+          - target: linux_armv7
+            qemu: qemu-arm
+          - target: linux_arm64
+            qemu: qemu-aarch64
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+      - name: Install qemu-user
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+      - name: Run fmon end to end
+        run: |
+          set -e
+          bin="$PWD/bin/fmon_${{ matrix.target }}"
+          chmod +x "$bin"
+          export FMON_CONFIG_DIR="$RUNNER_TEMP/fmon-cfg"
+          mkdir -p "$RUNNER_TEMP/data" && echo one > "$RUNNER_TEMP/data/a.txt"
+          run() { ${{ matrix.qemu }} "$bin" "$@"; }
+          run version
+          run add "$RUNNER_TEMP/data"
+          run scan
+          echo two > "$RUNNER_TEMP/data/b.txt"
+          run scan
+          run history
+          grep -q 'ADDED' "$FMON_CONFIG_DIR/fmon.log"
