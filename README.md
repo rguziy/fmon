@@ -1,6 +1,4 @@
-# fmon
-
-[![CI](https://github.com/rguziy/fmon/actions/workflows/ci.yml/badge.svg)](https://github.com/rguziy/fmon/actions/workflows/ci.yml)
+# 📜 fmon
 
 **fmon** is a lightweight File Integrity Monitoring (FIM) tool for Linux, macOS
 and Windows. It takes a snapshot of the files and folders you care about,
@@ -19,19 +17,34 @@ systemd timer, and fmon exits when it is done.
 
 ## 📚 Contents
 
-- [📖 How it works](#-how-it-works)
-- [📦 Installation](#-installation)
-- [🚀 Quick start](#-quick-start)
-- [💻 Commands](#-commands)
-- [🔧 Configuration](#-configuration)
-- [🔔 Notifications](#-notifications)
-- [⏰ Scheduling](#-scheduling)
-- [🚦 Exit codes](#-exit-codes)
-- [🔍 Behavior details](#-behavior-details)
-- [🔒 Security notes](#-security-notes)
-- [📁 Files and locations](#-files-and-locations)
-- [🔨 Building from source](#-building-from-source)
-- [📄 License](#-license)
+- [📜 fmon](#-fmon)
+  - [📚 Contents](#-contents)
+  - [📖 How it works](#-how-it-works)
+  - [📦 Installation](#-installation)
+    - [Download a release](#download-a-release)
+    - [With Go](#with-go)
+    - [From source](#from-source)
+  - [🚀 Quick start](#-quick-start)
+  - [💻 Commands](#-commands)
+    - [Adding sources](#adding-sources)
+    - [Listing what is watched](#listing-what-is-watched)
+    - [Scan output](#scan-output)
+  - [🔧 Configuration](#-configuration)
+  - [🔔 Notifications](#-notifications)
+    - [Sinks](#sinks)
+    - [Script interface](#script-interface)
+    - [Log rotation](#log-rotation)
+  - [⏰ Scheduling](#-scheduling)
+  - [🚦 Exit codes](#-exit-codes)
+  - [🔍 Behavior details](#-behavior-details)
+    - [A watched source disappears](#a-watched-source-disappears)
+    - [Unreadable files and folders](#unreadable-files-and-folders)
+    - [History](#history)
+    - [Upgrades](#upgrades)
+  - [🔒 Security notes](#-security-notes)
+  - [📁 Files and locations](#-files-and-locations)
+  - [🔨 Building from source](#-building-from-source)
+  - [📄 License](#-license)
 
 ## 📖 How it works
 
