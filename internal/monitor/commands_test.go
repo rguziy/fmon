@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -219,7 +220,7 @@ func TestHistoryAndClear(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := e.stdout.String()
-	if !strings.Contains(out, "ADDED") || !strings.Contains(out, `"`+filepath.Join(d, "new.txt")+`"`) || strings.Contains(out, "b.txt") {
+	if !strings.Contains(out, "ADDED") || !strings.Contains(out, strconv.Quote(filepath.Join(d, "new.txt"))) || strings.Contains(out, "b.txt") {
 		t.Fatalf("history for d = %q", out)
 	}
 

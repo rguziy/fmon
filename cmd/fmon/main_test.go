@@ -4,11 +4,25 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/rguziy/fmon/internal/version"
 )
+
+// tempDir returns a temporary directory with symbolic links resolved. "fmon
+// add" stores the resolved path, and temporary directories are behind a link on
+// macOS (/var -> /private/var) and may use 8.3 short names on Windows, so tests
+// that compare paths must start from the resolved form.
+func tempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = r
+	}
+	return dir
+}
 
 // runCLI executes the CLI in-process and returns exit code, stdout, stderr.
 func runCLI(t *testing.T, args ...string) (int, string, string) {
@@ -73,7 +87,7 @@ func TestUsageErrors(t *testing.T) {
 }
 
 func TestEndToEnd(t *testing.T) {
-	base := t.TempDir()
+	base := tempDir(t)
 	cfgDir := filepath.Join(base, "cfg")
 	data := filepath.Join(base, "data")
 	if err := os.MkdirAll(data, 0o755); err != nil {
@@ -114,13 +128,13 @@ func TestEndToEnd(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("scan with changes: %d %q", code, errs)
 	}
-	if !strings.Contains(out, `ADDED    "`+filepath.Join(data, "b.txt")+`" size=3`) ||
+	if !strings.Contains(out, "ADDED    "+strconv.Quote(filepath.Join(data, "b.txt"))+" size=3") ||
 		!strings.Contains(out, "2 file(s) scanned (1 hashed), 1 added, 0 modified, 0 deleted, 0 error(s)") ||
 		strings.Contains(out, "No changes.") {
 		t.Fatalf("scan output = %q", out)
 	}
 	logData, _ := os.ReadFile(filepath.Join(cfgDir, "fmon.log"))
-	if !strings.Contains(string(logData), `ADDED    "`+filepath.Join(data, "b.txt")+`"`) {
+	if !strings.Contains(string(logData), "ADDED    "+strconv.Quote(filepath.Join(data, "b.txt"))) {
 		t.Fatalf("fmon.log = %q", logData)
 	}
 
@@ -133,11 +147,11 @@ func TestEndToEnd(t *testing.T) {
 	// list shows the watched source; list --files every tracked file.
 	code, out, _ = runCLI(t, cfg, "list")
 	if code != exitOK || !strings.Contains(out, "TYPE") || !strings.Contains(out, "folder") || !strings.Contains(out, "active") ||
-		!strings.Contains(out, `"`+data+`"`) || !strings.Contains(out, "1 source(s), 2 file(s) tracked") {
+		!strings.Contains(out, strconv.Quote(data)) || !strings.Contains(out, "1 source(s), 2 file(s) tracked") {
 		t.Fatalf("list: %d %q", code, out)
 	}
 	code, out, _ = runCLI(t, cfg, "list", "--files")
-	if code != exitOK || !strings.Contains(out, filepath.Join(data, "a.txt")) || !strings.Contains(out, filepath.Join(data, "b.txt")) {
+	if code != exitOK || !strings.Contains(out, strconv.Quote(filepath.Join(data, "a.txt"))) || !strings.Contains(out, strconv.Quote(filepath.Join(data, "b.txt"))) {
 		t.Fatalf("list --files: %d %q", code, out)
 	}
 	code, out, _ = runCLI(t, cfg, "list", "--files", filepath.Join(data, "a.txt"))
@@ -158,7 +172,7 @@ func TestEndToEnd(t *testing.T) {
 }
 
 func TestScanExitCodeTwoOnNonFatalErrors(t *testing.T) {
-	base := t.TempDir()
+	base := tempDir(t)
 	cfgDir := filepath.Join(base, "cfg")
 	data := filepath.Join(base, "data")
 	_ = os.MkdirAll(data, 0o755)
@@ -232,7 +246,7 @@ func TestFirstRunDoesNotCreateFiles(t *testing.T) {
 }
 
 func TestMissingConfigWithExistingDatabaseIsProtected(t *testing.T) {
-	base := t.TempDir()
+	base := tempDir(t)
 	cfgDir := filepath.Join(base, "cfg")
 	data := filepath.Join(base, "data")
 	_ = os.MkdirAll(data, 0o755)
@@ -264,7 +278,7 @@ func TestMissingConfigWithExistingDatabaseIsProtected(t *testing.T) {
 }
 
 func TestDeletedDatabaseIsReportedNotSilent(t *testing.T) {
-	base := t.TempDir()
+	base := tempDir(t)
 	cfgDir := filepath.Join(base, "cfg")
 	data := filepath.Join(base, "data")
 	_ = os.MkdirAll(data, 0o755)

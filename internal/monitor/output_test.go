@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -116,7 +117,7 @@ func TestListSourcesStatuses(t *testing.T) {
 
 	row := func(path string) string {
 		for _, l := range strings.Split(out, "\n") {
-			if strings.HasSuffix(l, `"`+path+`"`) {
+			if strings.HasSuffix(l, strconv.Quote(path)) {
 				return l
 			}
 		}
