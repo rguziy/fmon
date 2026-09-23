@@ -331,11 +331,69 @@ func TestScanRollsBackWhenCancelled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := e.app.Scan(ctx); err == nil {
+	if _, err := e.app.Scan(ctx, false); err == nil {
 		t.Fatal("cancelled scan must fail")
 	}
 	// Nothing was recorded, so the change is still reported next time.
 	if got := e.changes(e.scan(t)); !sameSet(got, []string{"ADDED b.txt"}) {
 		t.Fatalf("changes = %v", got)
+	}
+}
+
+func TestFullScanCatchesSilentCorruption(t *testing.T) {
+	e := newEnv(t)
+	p := e.write(t, "f.txt", "original content")
+	if err := e.app.Add(context.Background(), e.root); err != nil {
+		t.Fatal(err)
+	}
+	mtime := e.clock
+
+	// Simulate corruption that a failing disk can produce: the bytes change
+	// but the filesystem metadata (size, mtime) does not, because the write
+	// path never goes through a normal write() that would touch them.
+	corrupted := "corrupted-conten" // same length (17 bytes) as "original content"
+	if len(corrupted) != len("original content") {
+		t.Fatal("test fixture: sizes must match")
+	}
+	if err := os.WriteFile(p, []byte(corrupted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+
+	// A normal scan trusts the stat shortcut and misses it.
+	if rep := e.scan(t); !rep.Empty() || rep.FilesHashed != 0 {
+		t.Fatalf("normal scan should skip an unchanged-metadata file: changes=%v hashed=%d", e.changes(rep), rep.FilesHashed)
+	}
+
+	// --full bypasses the shortcut and catches it.
+	rep := e.scanFull(t)
+	if got := e.changes(rep); !sameSet(got, []string{"MODIFIED f.txt"}) {
+		t.Fatalf("full scan changes = %v", got)
+	}
+	if rep.FilesHashed != 1 || !rep.Full {
+		t.Fatalf("hashed=%d full=%v", rep.FilesHashed, rep.Full)
+	}
+
+	// After --full updates the stored hash, a normal scan is clean again.
+	if rep := e.scan(t); !rep.Empty() {
+		t.Fatalf("scan after full repair should be clean: %v", e.changes(rep))
+	}
+}
+
+func TestFullScanHashesEverythingEvenUnchanged(t *testing.T) {
+	e := newEnv(t)
+	e.write(t, "a.txt", "a")
+	e.write(t, "b.txt", "b")
+	if err := e.app.Add(context.Background(), e.root); err != nil {
+		t.Fatal(err)
+	}
+	if rep := e.scan(t); rep.FilesHashed != 0 {
+		t.Fatalf("baseline scan afterwards should skip both: hashed=%d", rep.FilesHashed)
+	}
+	rep := e.scanFull(t)
+	if rep.FilesHashed != 2 || !rep.Empty() {
+		t.Fatalf("full scan of an untouched tree: hashed=%d changes=%v", rep.FilesHashed, e.changes(rep))
 	}
 }

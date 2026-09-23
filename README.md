@@ -1,5 +1,7 @@
 # 📜 fmon
 
+[![CI](https://github.com/rguziy/fmon/actions/workflows/ci.yml/badge.svg)](https://github.com/rguziy/fmon/actions/workflows/ci.yml)
+
 **fmon** is a lightweight File Integrity Monitoring (FIM) tool for Linux, macOS
 and Windows. It takes a snapshot of the files and folders you care about,
 compares it with the previous snapshot, and tells you what was **added**,
@@ -138,7 +140,7 @@ fmon [global flags] <command> [arguments]
 | Command | Description |
 |---|---|
 | `fmon` (no command) | Print the list of commands (not an error, exit code 0). |
-| `fmon scan` | Take a snapshot, record changes, print them and the statistics, notify. `fmon --scan` is an alias. |
+| `fmon scan [--full]` | Take a snapshot, record changes, print them and the statistics, notify. `fmon --scan` is an alias. `--full` hashes every file, bypassing the size+mtime shortcut. |
 | `fmon list [--files] [path]` | List the watched files and folders. With `--files`: every tracked file (hash, size, mtime, path), optionally limited to a file or folder tree. |
 | `fmon add <path>` | Watch a file or folder and index its current contents as the baseline. |
 | `fmon rm <path>` | Stop watching an exact watched source. History is kept. |
@@ -201,6 +203,28 @@ database but no longer in `fmon.toml` (the next scan removes it).
 time and the quoted path. `fmon list --files /etc/ssh` limits it to that file
 or folder tree.
 
+### Full scans (`--full`)
+
+By default a scan trusts the size + modification time of a file: if both are
+unchanged since the last scan, the file is not read. This is fast, but it can
+miss content that changed while size and mtime stayed the same — for example
+bits flipped by a failing disk or a corrupted filesystem, if the write never
+went through a normal `write()` that would update the file's metadata.
+
+`fmon scan --full` hashes every regular file in every watched source,
+regardless of its stored metadata, so this kind of silent corruption is still
+caught. It is slower (every byte of every tracked file is read from disk), so
+schedule it separately from the fast, frequent scan — daily or weekly rather
+than every few minutes — and expect it to take noticeably longer on a large
+archive.
+
+```cron
+# Fast check every 15 minutes
+*/15 * * * *  /usr/local/bin/fmon scan -q
+# Full re-hash once a week, catches silent corruption the fast check cannot
+0 3 * * 1     /usr/local/bin/fmon scan --full -q
+```
+
 ### Scan output
 
 `fmon scan` prints the alerts, every change, and a statistics line. Paths are
@@ -223,9 +247,10 @@ No changes. Scan finished in 0.4s: 3 source(s), 12345 file(s) scanned (0 hashed)
 ```
 
 "Scanned" counts every regular file that was examined; "hashed" counts those
-whose size or mtime changed, so their content had to be read. This output is
-independent of the notification sinks (it always lists every change). Add `-q`
-to suppress it, which is what you want in cron.
+whose size or mtime changed (or every file, with `--full`), so their content
+had to be read. This output is independent of the notification sinks (it
+always lists every change). Add `-q` to suppress it, which is what you want in
+cron.
 
 ## 🔧 Configuration
 
@@ -500,7 +525,10 @@ against.
   and ordinary changes (config edits, package updates, corruption). It does not
   resist an attacker who deliberately crafts a colliding file.
 - **The stat shortcut can be bypassed.** A file whose size and mtime were
-  restored (`touch -r`) after modification is skipped by the first pass.
+  restored (`touch -r`) after modification is skipped by the first pass. The
+  same shortcut can also miss corruption from a failing disk if the metadata
+  is not updated. Run `fmon scan --full` periodically (see
+  [Full scans (`--full`)](#full-scans---full)) to hash everything and catch this.
 - **No tamper protection.** Anyone who can write `fmon.db`, `fmon.toml` or the
   fmon binary can hide changes. For serious use, run fmon as a dedicated
   privileged user, keep the configuration directory private (fmon creates it

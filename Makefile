@@ -11,7 +11,7 @@
 # the "zip" tool, which must be installed.
 
 MODULE  := github.com/rguziy/fmon
-VERSION ?= 1.0.0
+VERSION ?= 1.1.0
 DIST    := dist
 LDFLAGS := -s -w -X $(MODULE)/internal/version.Version=$(VERSION)
 

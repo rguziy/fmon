@@ -39,8 +39,8 @@ func TestVersion(t *testing.T) {
 			t.Errorf("%v -> %d %q", args, code, out)
 		}
 	}
-	if version.Version != "1.0.0" {
-		t.Errorf("source tree version = %q, want 1.0.0", version.Version)
+	if version.Version != "1.1.0" {
+		t.Errorf("source tree version = %q, want 1.1.0", version.Version)
 	}
 }
 
@@ -76,6 +76,7 @@ func TestUsageErrors(t *testing.T) {
 		{"unknown flag", []string{cfg, "scan", "--nope"}},
 		{"files outside list", []string{cfg, "scan", "--files"}},
 		{"list path without files", []string{cfg, "list", "/tmp"}},
+		{"full outside scan", []string{cfg, "history", "--full"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,6 +143,12 @@ func TestEndToEnd(t *testing.T) {
 	code, out, _ = runCLI(t, cfg, "history", data, "--limit", "5")
 	if code != exitOK || !strings.Contains(out, "ADDED") {
 		t.Fatalf("history: %d %q", code, out)
+	}
+
+	// --full bypasses the size+mtime shortcut.
+	code, out, errs = runCLI(t, cfg, "scan", "--full")
+	if code != exitOK || errs != "" || !strings.Contains(out, "Full scan.") || !strings.Contains(out, "(2 hashed)") {
+		t.Fatalf("scan --full: %d stdout=%q stderr=%q", code, out, errs)
 	}
 
 	// list shows the watched source; list --files every tracked file.

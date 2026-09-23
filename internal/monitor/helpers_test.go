@@ -91,9 +91,19 @@ func (e *env) write(t *testing.T, rel, content string) string {
 
 func (e *env) scan(t *testing.T) *Report {
 	t.Helper()
-	rep, err := e.app.Scan(context.Background())
+	rep, err := e.app.Scan(context.Background(), false)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
+	}
+	return rep
+}
+
+// scanFull is like scan but with --full (bypasses the stat shortcut).
+func (e *env) scanFull(t *testing.T) *Report {
+	t.Helper()
+	rep, err := e.app.Scan(context.Background(), true)
+	if err != nil {
+		t.Fatalf("scan --full: %v", err)
 	}
 	return rep
 }

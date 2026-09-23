@@ -39,6 +39,9 @@ func (a *App) PrintScan(rep *Report) {
 	if rep.Empty() {
 		prefix = "No changes. "
 	}
+	if rep.Full {
+		prefix += "Full scan. "
+	}
 	missing := ""
 	if rep.MissingSources > 0 {
 		missing = fmt.Sprintf(" (%d missing)", rep.MissingSources)

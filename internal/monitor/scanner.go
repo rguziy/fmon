@@ -30,6 +30,7 @@ type Report struct {
 	FilesScanned   int           // regular files examined
 	FilesHashed    int           // files whose content had to be hashed
 	Duration       time.Duration // wall-clock time of the scan
+	Full           bool          // this was a --full scan (stat shortcut bypassed)
 }
 
 // Counts returns the number of ADDED, MODIFIED and DELETED changes.
@@ -68,9 +69,15 @@ type plannedSource struct {
 // two concurrent runs cannot interleave and a failed or interrupted scan
 // leaves the database untouched. Changes are committed together and only then
 // returned to the caller, which dispatches notifications.
-func (a *App) Scan(ctx context.Context) (*Report, error) {
+//
+// With full=true, every regular file is stream-hashed regardless of its
+// stored size and modification time (the normal pass-1 stat shortcut is
+// skipped). This is slower but catches content that changed silently while
+// size and mtime stayed the same, for example bits flipped by a failing
+// disk without the filesystem updating the file's metadata.
+func (a *App) Scan(ctx context.Context, full bool) (*Report, error) {
 	started := a.now()
-	rep := &Report{Time: started, Host: a.Hostname}
+	rep := &Report{Time: started, Host: a.Hostname, Full: full}
 
 	tx, err := db.BeginImmediate(ctx, a.DB)
 	if err != nil {
@@ -107,7 +114,7 @@ func (a *App) Scan(ctx context.Context) (*Report, error) {
 			return nil, err
 		}
 		scannedBefore, hashedBefore := rep.FilesScanned, rep.FilesHashed
-		if err := a.scanSource(ctx, tx, ps.src, excl, ps.baseline || baselineAll, rep); err != nil {
+		if err := a.scanSource(ctx, tx, ps.src, excl, ps.baseline || baselineAll, full, rep); err != nil {
 			return nil, err
 		}
 		a.vlogf("%s %q: %d file(s) scanned, %d hashed", kindOf(ps.src.Type), ps.src.Path,
@@ -236,6 +243,7 @@ func (a *App) reconcile(ctx context.Context, tx db.DBTX, rep *Report) ([]planned
 type sourceScan struct {
 	src        models.Source
 	baseline   bool
+	full       bool // --full: bypass the pass-1 stat shortcut, always hash
 	states     map[string]models.FileState
 	seen       map[string]struct{}
 	unreadable []string // directories whose contents could not be listed
@@ -251,7 +259,7 @@ func kindOf(t models.SourceType) string {
 // scanSource diffs one source against the stored state. In baseline mode it
 // only records the current state and reports nothing. Non-fatal problems are
 // added to rep; the returned error is fatal (database failure, cancellation).
-func (a *App) scanSource(ctx context.Context, tx db.DBTX, src models.Source, excl *Excluder, baseline bool, rep *Report) error {
+func (a *App) scanSource(ctx context.Context, tx db.DBTX, src models.Source, excl *Excluder, baseline, full bool, rep *Report) error {
 	kind := kindOf(src.Type)
 
 	info, err := os.Lstat(src.Path)
@@ -286,6 +294,7 @@ func (a *App) scanSource(ctx context.Context, tx db.DBTX, src models.Source, exc
 	sc := &sourceScan{
 		src:      src,
 		baseline: baseline,
+		full:     full,
 		states:   states,
 		seen:     make(map[string]struct{}, len(states)),
 	}
@@ -363,8 +372,8 @@ func (a *App) checkFile(ctx context.Context, tx db.DBTX, rep *Report, sc *source
 	mtime := fi.ModTime().UnixNano()
 
 	old, known := sc.states[p]
-	if known && old.Size == size && old.ModTime == mtime {
-		return nil // pass 1: unchanged
+	if !sc.full && known && old.Size == size && old.ModTime == mtime {
+		return nil // pass 1: unchanged (skipped entirely with --full)
 	}
 
 	sum, _, err := hasher.File(ctx, p)

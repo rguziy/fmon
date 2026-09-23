@@ -35,7 +35,9 @@ Usage:
   fmon [global flags] <command> [arguments]
 
 Commands:
-  scan                    Take a snapshot and report changes (alias: fmon --scan)
+  scan [--full]           Take a snapshot and report changes (alias: fmon --scan).
+                          --full: hash every file, bypassing the fast
+                          size+mtime check (catches silent corruption).
   list [--files] [path]   List watched files and folders (--files: every tracked file)
   add <path>              Start watching a file or folder and index it
   rm <path>               Stop watching a file or folder
@@ -155,6 +157,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	bindGlobal(sub, &g)
 
 	limit := sub.Int("limit", 100, "history: maximum number of records (0 = unlimited)")
+	full := sub.Bool("full", false, "scan: hash every file, bypassing the size+mtime shortcut")
 	listFiles := sub.Bool("files", false, "list: show every tracked file")
 	clearAll := sub.Bool("all", false, "clear: reset everything")
 	clearHist := sub.Bool("history-all", false, "clear: delete the whole history")
@@ -182,6 +185,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return exitFatal
 	case given["files"] && cmd != "list":
 		fmt.Fprintln(stderr, "[fmon] ERROR: --files is only valid for the list command")
+		return exitFatal
+	case given["full"] && cmd != "scan":
+		fmt.Fprintln(stderr, "[fmon] ERROR: --full is only valid for the scan command")
 		return exitFatal
 	case (given["all"] || given["history-all"] || given["path"]) && cmd != "clear":
 		fmt.Fprintln(stderr, "[fmon] ERROR: --all, --history-all and --path are only valid for the clear command")
@@ -300,7 +306,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// ---- dispatch ---------------------------------------------------------------
 	switch cmd {
 	case "scan":
-		rep, err := app.Scan(ctx)
+		rep, err := app.Scan(ctx, *full)
 		if err != nil {
 			return fail(err)
 		}

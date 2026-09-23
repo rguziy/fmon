@@ -135,8 +135,11 @@ func (a *App) Add(ctx context.Context, arg string) error {
 	}
 	src := models.Source{ID: id, Path: resolved, Type: typ, Status: models.StatusActive}
 
+	// A new source is always hashed in full regardless of full=false/true:
+	// baseline mode has no prior state to compare stat metadata against, so
+	// scanSource hashes every file unconditionally either way.
 	rep := &Report{Time: a.now(), Host: a.Hostname}
-	if err := a.scanSource(ctx, tx, src, NewExcluder(a.Cfg.Exclude), true, rep); err != nil {
+	if err := a.scanSource(ctx, tx, src, NewExcluder(a.Cfg.Exclude), true, false, rep); err != nil {
 		return err
 	}
 
