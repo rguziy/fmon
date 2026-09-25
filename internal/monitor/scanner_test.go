@@ -397,3 +397,143 @@ func TestFullScanHashesEverythingEvenUnchanged(t *testing.T) {
 		t.Fatalf("full scan of an untouched tree: hashed=%d changes=%v", rep.FilesHashed, e.changes(rep))
 	}
 }
+
+func TestScanOnlySelectedSources(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.write(t, "photo/a.jpg", "a")
+	e.write(t, "music/b.mp3", "b")
+	photo, music := filepath.Join(e.root, "photo"), filepath.Join(e.root, "music")
+	for _, p := range []string{photo, music} {
+		if err := e.app.Add(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.write(t, "photo/a.jpg", "a changed")
+	e.write(t, "music/b.mp3", "b changed")
+
+	// Scanning only "photo" must not touch "music"'s state or history.
+	rep, err := e.app.Scan(ctx, false, photo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Sources != 1 {
+		t.Fatalf("Sources = %d, want 1", rep.Sources)
+	}
+	if got := e.changes(rep); !sameSet(got, []string{"MODIFIED photo/a.jpg"}) {
+		t.Fatalf("changes = %v", got)
+	}
+
+	// A full, unfiltered scan then finds only the still-unreported music change.
+	rep2 := e.scan(t)
+	if got := e.changes(rep2); !sameSet(got, []string{"MODIFIED music/b.mp3"}) {
+		t.Fatalf("second scan changes = %v", got)
+	}
+}
+
+func TestScanMultiplePathsAndDeduplication(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.write(t, "photo/a.jpg", "a")
+	e.write(t, "music/b.mp3", "b")
+	e.write(t, "films/c.mkv", "c")
+	photo, music, films := filepath.Join(e.root, "photo"), filepath.Join(e.root, "music"), filepath.Join(e.root, "films")
+	for _, p := range []string{photo, music, films} {
+		if err := e.app.Add(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.write(t, "photo/a.jpg", "a2")
+	e.write(t, "music/b.mp3", "b2")
+	e.write(t, "films/c.mkv", "c2")
+
+	// Two of the three, one of them repeated: scanned once, films untouched.
+	rep, err := e.app.Scan(ctx, false, photo, music, photo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Sources != 2 {
+		t.Fatalf("Sources = %d, want 2", rep.Sources)
+	}
+	if got := e.changes(rep); !sameSet(got, []string{"MODIFIED photo/a.jpg", "MODIFIED music/b.mp3"}) {
+		t.Fatalf("changes = %v", got)
+	}
+
+	rep2 := e.scan(t)
+	if got := e.changes(rep2); !sameSet(got, []string{"MODIFIED films/c.mkv"}) {
+		t.Fatalf("films must still be pending: %v", got)
+	}
+}
+
+func TestScanFullWithSelectedSource(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	p := e.write(t, "photo/a.jpg", "original content")
+	photo := filepath.Join(e.root, "photo")
+	if err := e.app.Add(ctx, photo); err != nil {
+		t.Fatal(err)
+	}
+	e.write(t, "other/x.txt", "x")
+	other := filepath.Join(e.root, "other")
+	if err := e.app.Add(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+
+	mtime := e.clock
+	corrupted := "corrupted-conten" // same length as "original content"
+	if err := os.WriteFile(p, []byte(corrupted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := e.app.Scan(ctx, true, photo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Full || rep.Sources != 1 {
+		t.Fatalf("Full=%v Sources=%d", rep.Full, rep.Sources)
+	}
+	if got := e.changes(rep); !sameSet(got, []string{"MODIFIED photo/a.jpg"}) {
+		t.Fatalf("changes = %v", got)
+	}
+}
+
+func TestScanRejectsPathNotWatched(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.write(t, "photo/a.jpg", "a")
+	photo := filepath.Join(e.root, "photo")
+	if err := e.app.Add(ctx, photo); err != nil {
+		t.Fatal(err)
+	}
+
+	// A path that was never added at all.
+	if _, err := e.app.Scan(ctx, false, filepath.Join(e.root, "nope")); err == nil {
+		t.Fatal("scanning an unwatched path must fail")
+	}
+
+	// A path inside a watched source, but not the source itself: fails and
+	// names the covering source, so the user is not misled into thinking the
+	// subtree alone was scanned (fmon has no per-file granularity).
+	sub := filepath.Join(photo, "a.jpg")
+	if _, err := e.app.Scan(ctx, false, sub); err == nil || !strings.Contains(err.Error(), "covered by") || !strings.Contains(err.Error(), photo) {
+		t.Fatalf("err = %v", err)
+	}
+
+	// Nothing was scanned or committed by the failed attempt.
+	if rep := e.scan(t); !rep.Empty() {
+		t.Fatalf("a rejected scan must not have committed anything: %v", e.changes(rep))
+	}
+
+	// One good path plus one bad path: the whole call fails, nothing scanned.
+	e.write(t, "photo/a.jpg", "changed")
+	if _, err := e.app.Scan(ctx, false, photo, filepath.Join(e.root, "nope")); err == nil {
+		t.Fatal("a request mixing a valid and an invalid path must fail entirely")
+	}
+	hist, _ := db.QueryHistory(ctx, e.app.DB, "", 0)
+	if len(hist) != 0 {
+		t.Fatalf("nothing should have been committed: %d history record(s)", len(hist))
+	}
+}

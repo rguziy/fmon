@@ -140,7 +140,7 @@ fmon [global flags] <command> [arguments]
 | Command | Description |
 |---|---|
 | `fmon` (no command) | Print the list of commands (not an error, exit code 0). |
-| `fmon scan [--full]` | Take a snapshot, record changes, print them and the statistics, notify. `fmon --scan` is an alias. `--full` hashes every file, bypassing the size+mtime shortcut. |
+| `fmon scan [--full] [path...]` | Take a snapshot, record changes, print them and the statistics, notify. `fmon --scan` is an alias for a plain `fmon scan` with no arguments. `--full` hashes every file, bypassing the size+mtime shortcut. With one or more paths (each an exact watched source, as shown by `fmon list`): scan only those; with none: scan every watched source. |
 | `fmon list [--files] [path]` | List the watched files and folders. With `--files`: every tracked file (hash, size, mtime, path), optionally limited to a file or folder tree. |
 | `fmon add <path>` | Watch a file or folder and index its current contents as the baseline. |
 | `fmon rm <path>` | Stop watching an exact watched source. History is kept. |
@@ -224,6 +224,35 @@ archive.
 # Full re-hash once a week, catches silent corruption the fast check cannot
 0 3 * * 1     /usr/local/bin/fmon scan --full -q
 ```
+
+### Scanning selected sources
+
+`fmon scan` normally goes through every watched source. Add one or more paths
+to scan only those, leaving the rest untouched for this run — each path must
+be the exact path of a watched source, as `fmon list` shows it (a path merely
+inside a source, or a source you never added, is rejected):
+
+```sh
+fmon scan /mnt/usb/photo
+fmon scan --full /mnt/usb/photo /mnt/nas/films
+```
+
+This is mainly useful to spread `--full` re-hashes of several large,
+independent archives across different nights instead of running them all back
+to back:
+
+```cron
+# Fast check across everything, daily
+0  13 * * *   /usr/local/bin/fmon scan -q
+# Full re-hash, one archive per night
+0  3  * * 0   /usr/local/bin/fmon scan --full -q /mnt/usb/photo
+0  3  * * 1   /usr/local/bin/fmon scan --full -q /mnt/nas/films
+0  3  * * 2   /usr/local/bin/fmon scan --full -q /mnt/nas/music
+```
+
+A run restricted this way still reconciles `fmon.toml` against the database
+for every source beforehand (so `fmon list` stays accurate), only the
+diffing/hashing step is limited to the paths given.
 
 ### Scan output
 

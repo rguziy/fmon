@@ -9,4 +9,4 @@ package version
 //	go build -ldflags "-X github.com/rguziy/fmon/internal/version.Version=1.0.0"
 //
 // It must stay a variable (not a constant) for -X to work.
-var Version = "1.1.0"
+var Version = "1.2.0"

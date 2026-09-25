@@ -165,53 +165,70 @@ func (a *App) Add(ctx context.Context, arg string) error {
 
 // Remove stops watching an exact source. Its file states are removed by the
 // foreign key cascade; the change history is kept.
-func (a *App) Remove(ctx context.Context, arg string) error {
+// resolveWatchedSource resolves a user-given path to the exact path of a
+// currently watched source (from cfgSources and the database, matched
+// against both the given path and its symlink-resolved form, as "fmon add"
+// stores the resolved path). It returns an error naming the covering source
+// when the path lies inside one instead of being a source itself.
+func resolveWatchedSource(ctx context.Context, q db.DBTX, cfgSources []string, arg string) (string, error) {
 	abs, err := normalizePath(arg)
 	if err != nil {
-		return err
+		return "", err
 	}
 	candidates := []string{abs}
 	if r, err := filepath.EvalSymlinks(abs); err == nil && !equalPath(filepath.Clean(r), abs) {
 		candidates = append(candidates, filepath.Clean(r))
 	}
 
+	sources, err := db.ListSources(ctx, q)
+	if err != nil {
+		return "", err
+	}
+	all := append([]string(nil), cfgSources...)
+	for _, s := range sources {
+		all = append(all, s.Path)
+	}
+
+	for _, c := range candidates {
+		for _, p := range all {
+			if equalPath(c, p) {
+				return p, nil
+			}
+		}
+	}
+	for _, p := range all {
+		if within(abs, p) {
+			return "", fmt.Errorf("%q is not a watched source; it is covered by %q", abs, p)
+		}
+	}
+	return "", fmt.Errorf("%q is not a watched source", abs)
+}
+
+func (a *App) Remove(ctx context.Context, arg string) error {
 	tx, err := db.BeginImmediate(ctx, a.DB)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	target, err := resolveWatchedSource(ctx, tx, a.Cfg.Sources, arg)
+	if err != nil {
+		if strings.Contains(err.Error(), "covered by") {
+			return fmt.Errorf("%s (use: fmon rm %s)", err, target)
+		}
+		return err
+	}
+
 	sources, err := db.ListSources(ctx, tx)
 	if err != nil {
 		return err
 	}
-	byPath := make(map[string]models.Source, len(sources))
-	all := append([]string(nil), a.Cfg.Sources...)
 	for _, s := range sources {
-		byPath[s.Path] = s
-		all = append(all, s.Path)
-	}
-
-	target := ""
-	for _, c := range candidates {
-		for _, p := range all {
-			if equalPath(c, p) {
-				target = p
+		if s.Path == target {
+			if err := db.DeleteSource(ctx, tx, s.ID); err != nil {
+				return err
 			}
-		}
-	}
-	if target == "" {
-		for _, p := range all {
-			if within(abs, p) {
-				return fmt.Errorf("%q is not a watched source; it is covered by %q (use: fmon rm %s)", abs, p, p)
-			}
-		}
-		return fmt.Errorf("%q is not a watched source", abs)
-	}
-
-	if s, ok := byPath[target]; ok {
-		if err := db.DeleteSource(ctx, tx, s.ID); err != nil {
-			return err
+			break
 		}
 	}
 	a.Cfg.RemoveSource(target)

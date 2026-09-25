@@ -63,7 +63,12 @@ type plannedSource struct {
 	baseline bool
 }
 
-// Scan performs one snapshot scan of all watched sources.
+// Scan performs one snapshot scan of all watched sources, or only the ones
+// named in only (their exact watched path, as shown by "fmon list"). An empty
+// only means every watched source, which is what unattended cron/systemd runs
+// want. Filtering only changes which sources are diffed and hashed: fmon.toml
+// is still reconciled against the database in full beforehand (see
+// reconcile), and the audit history of every source is unaffected.
 //
 // The whole scan runs inside a single write transaction (BEGIN IMMEDIATE), so
 // two concurrent runs cannot interleave and a failed or interrupted scan
@@ -75,7 +80,7 @@ type plannedSource struct {
 // skipped). This is slower but catches content that changed silently while
 // size and mtime stayed the same, for example bits flipped by a failing
 // disk without the filesystem updating the file's metadata.
-func (a *App) Scan(ctx context.Context, full bool) (*Report, error) {
+func (a *App) Scan(ctx context.Context, full bool, only ...string) (*Report, error) {
 	started := a.now()
 	rep := &Report{Time: started, Host: a.Hostname, Full: full}
 
@@ -85,10 +90,10 @@ func (a *App) Scan(ctx context.Context, full bool) (*Report, error) {
 	}
 	defer tx.Rollback()
 
-	// A schema migration that invalidated files_state, or a database that was
-	// lost and recreated, asks for a silent re-baseline. It is never silent
-	// for the user: the report carries a notice explaining why nothing was
-	// compared.
+	// A migration or a lost-and-recreated database asks for a full silent
+	// re-baseline. A scan restricted to a subset of sources still honors it
+	// (there is no partial baseline), but the caller should not normally
+	// combine "only" with an upgrade in progress.
 	baselineAll := false
 	if v, ok, err := db.GetMeta(ctx, tx, db.MetaNeedsBaseline); err != nil {
 		return nil, err
@@ -106,6 +111,13 @@ func (a *App) Scan(ctx context.Context, full bool) (*Report, error) {
 	planned, err := a.reconcile(ctx, tx, rep)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(only) > 0 {
+		planned, err = filterPlanned(ctx, tx, a.Cfg.Sources, planned, only)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	excl := NewExcluder(a.Cfg.Exclude)
@@ -133,6 +145,42 @@ func (a *App) Scan(ctx context.Context, full bool) (*Report, error) {
 	rep.Sources = len(planned)
 	rep.Duration = a.now().Sub(started)
 	return rep, nil
+}
+
+// filterPlanned resolves each of the requested paths to a watched source and
+// returns the subset of planned matching them, in the order the paths were
+// given. It fails, naming the offending path, if a requested path is not
+// watched at all or is only covered by a source rather than being one, so
+// that "fmon scan /etc/ssh" cannot silently scan the whole of "/etc" instead.
+// A path given more than once scans that source only once.
+func filterPlanned(ctx context.Context, q db.DBTX, cfgSources []string, planned []plannedSource, only []string) ([]plannedSource, error) {
+	byPath := make(map[string]plannedSource, len(planned))
+	for _, ps := range planned {
+		byPath[ps.src.Path] = ps
+	}
+
+	var out []plannedSource
+	seen := make(map[string]bool, len(only))
+	for _, arg := range only {
+		target, err := resolveWatchedSource(ctx, q, cfgSources, arg)
+		if err != nil {
+			return nil, err
+		}
+		if seen[target] {
+			continue
+		}
+		seen[target] = true
+		ps, ok := byPath[target]
+		if !ok {
+			// Resolved to a real watched source, but it is not part of this
+			// scan's plan: currently only possible for a source whose root
+			// could not be baselined (see reconcile), which already added a
+			// warning or a non-fatal error to the report.
+			return nil, fmt.Errorf("%q could not be scanned; see the warnings above", target)
+		}
+		out = append(out, ps)
+	}
+	return out, nil
 }
 
 // reconcile makes watched_sources match the sources listed in fmon.toml, which

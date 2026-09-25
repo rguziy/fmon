@@ -35,9 +35,12 @@ Usage:
   fmon [global flags] <command> [arguments]
 
 Commands:
-  scan [--full]           Take a snapshot and report changes (alias: fmon --scan).
+  scan [--full] [path...]  Take a snapshot and report changes (alias: fmon --scan).
                           --full: hash every file, bypassing the fast
                           size+mtime check (catches silent corruption).
+                          With one or more paths: scan only those watched
+                          sources (each must match a source exactly, as
+                          shown by 'fmon list'); with none: scan all of them.
   list [--files] [path]   List watched files and folders (--files: every tracked file)
   add <path>              Start watching a file or folder and index it
   rm <path>               Stop watching a file or folder
@@ -139,7 +142,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, usageText)
 		return exitOK
 	case scanAlias && cmd != "":
-		fmt.Fprintln(stderr, "[fmon] ERROR: --scan cannot be combined with a command")
+		fmt.Fprintln(stderr, "[fmon] ERROR: --scan cannot be combined with a command or a path; use 'fmon scan [--full] [path...]' instead")
 		return exitFatal
 	case scanAlias:
 		cmd = "scan"
@@ -164,7 +167,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	clearPath := sub.String("path", "", "clear: delete history of this file or folder tree")
 
 	maxPositional, known := map[string]int{
-		"scan": 0, "init": 0, "clear": 0, "add": 1, "rm": 1, "history": 1, "list": 1,
+		"scan": -1, "init": 0, "clear": 0, "add": 1, "rm": 1, "history": 1, "list": 1,
 	}[cmd]
 	if !known {
 		fmt.Fprintf(stderr, "[fmon] ERROR: unknown command %q\n\n%s", cmd, usageText)
@@ -192,7 +195,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case (given["all"] || given["history-all"] || given["path"]) && cmd != "clear":
 		fmt.Fprintln(stderr, "[fmon] ERROR: --all, --history-all and --path are only valid for the clear command")
 		return exitFatal
-	case len(positional) > maxPositional:
+	case maxPositional >= 0 && len(positional) > maxPositional:
 		fmt.Fprintf(stderr, "[fmon] ERROR: unexpected argument %q\n", positional[maxPositional])
 		return exitFatal
 	case (cmd == "add" || cmd == "rm") && len(positional) != 1:
@@ -306,7 +309,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// ---- dispatch ---------------------------------------------------------------
 	switch cmd {
 	case "scan":
-		rep, err := app.Scan(ctx, *full)
+		rep, err := app.Scan(ctx, *full, positional...)
 		if err != nil {
 			return fail(err)
 		}

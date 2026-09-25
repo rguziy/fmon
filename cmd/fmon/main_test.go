@@ -39,8 +39,8 @@ func TestVersion(t *testing.T) {
 			t.Errorf("%v -> %d %q", args, code, out)
 		}
 	}
-	if version.Version != "1.1.0" {
-		t.Errorf("source tree version = %q, want 1.1.0", version.Version)
+	if version.Version != "1.2.0" {
+		t.Errorf("source tree version = %q, want 1.2.0", version.Version)
 	}
 }
 
@@ -175,6 +175,55 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if code, out, _ := runCLI(t, cfg, "history"); code != exitOK || !strings.Contains(out, "No history") {
 		t.Fatalf("history after reset: %d %q", code, out)
+	}
+}
+
+func TestScanWithSourcePaths(t *testing.T) {
+	base := tempDir(t)
+	cfgDir := filepath.Join(base, "cfg")
+	photo := filepath.Join(base, "photo")
+	music := filepath.Join(base, "music")
+	for _, d := range []string{photo, music} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(photo, "a.jpg"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(music, "b.mp3"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "--config-dir=" + cfgDir
+	if code, _, e := runCLI(t, cfg, "add", photo); code != exitOK {
+		t.Fatalf("add photo: %d %s", code, e)
+	}
+	if code, _, e := runCLI(t, cfg, "add", music); code != exitOK {
+		t.Fatalf("add music: %d %s", code, e)
+	}
+
+	if err := os.WriteFile(filepath.Join(photo, "a.jpg"), []byte("a2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(music, "b.mp3"), []byte("b2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Scanning only "photo" leaves "music" pending.
+	code, out, errs := runCLI(t, cfg, "scan", photo)
+	if code != exitOK || errs != "" || !strings.Contains(out, "1 source(s)") ||
+		!strings.Contains(out, strconv.Quote(filepath.Join(photo, "a.jpg"))) ||
+		strings.Contains(out, "b.mp3") {
+		t.Fatalf("scan photo: %d stdout=%q stderr=%q", code, out, errs)
+	}
+	code, out, _ = runCLI(t, cfg, "scan", music)
+	if code != exitOK || !strings.Contains(out, strconv.Quote(filepath.Join(music, "b.mp3"))) {
+		t.Fatalf("scan music: %d stdout=%q", code, out)
+	}
+
+	// A path that is not a watched source is a fatal error.
+	if code, _, errs := runCLI(t, cfg, "scan", filepath.Join(base, "nope")); code != exitFatal || !strings.Contains(errs, "not a watched source") {
+		t.Fatalf("scan unwatched path: %d %q", code, errs)
 	}
 }
 
