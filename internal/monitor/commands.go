@@ -79,6 +79,7 @@ func (a *App) Init(ctx context.Context, yes bool) error {
 // Add starts watching a file or folder and indexes its current contents as
 // the baseline (hashing every regular file).
 func (a *App) Add(ctx context.Context, arg string) error {
+	started := a.now()
 	abs, err := normalizePath(arg)
 	if err != nil {
 		return err
@@ -153,9 +154,10 @@ func (a *App) Add(ctx context.Context, arg string) error {
 	}
 
 	if typ == models.SourceFile {
-		a.infof("[fmon] Added file %q\n", resolved)
+		a.infof("[fmon] Added file %q in %s\n", resolved, a.now().Sub(started).Round(time.Millisecond))
 	} else {
-		a.infof("[fmon] Added folder %q: %d file(s) indexed\n", resolved, rep.FilesScanned)
+		a.infof("[fmon] Added folder %q: %d file(s) indexed in %s\n",
+			resolved, rep.FilesScanned, a.now().Sub(started).Round(time.Millisecond))
 	}
 	if len(rep.Errors) > 0 {
 		a.infof("[fmon] %d path(s) could not be read and were skipped\n", len(rep.Errors))
