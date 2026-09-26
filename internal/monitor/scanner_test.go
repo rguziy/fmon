@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -518,7 +519,7 @@ func TestScanRejectsPathNotWatched(t *testing.T) {
 	// names the covering source, so the user is not misled into thinking the
 	// subtree alone was scanned (fmon has no per-file granularity).
 	sub := filepath.Join(photo, "a.jpg")
-	if _, err := e.app.Scan(ctx, false, sub); err == nil || !strings.Contains(err.Error(), "covered by") || !strings.Contains(err.Error(), photo) {
+	if _, err := e.app.Scan(ctx, false, sub); err == nil || !strings.Contains(err.Error(), "covered by") || !strings.Contains(err.Error(), strconv.Quote(photo)) {
 		t.Fatalf("err = %v", err)
 	}
 
